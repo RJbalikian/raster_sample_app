@@ -7,9 +7,10 @@ import requests
 import rioxarray as rxr
 import streamlit as st
 from owslib.wms import WebMapService
-from io import BytesIO
+from io import BytesIO, StringIO
 import plotly.graph_objects as go
 import plotly.express as px
+import codecs
 
 #matplotlib.use("agg")
 
@@ -29,6 +30,7 @@ DEFAULT_POINTS_CRS_INDEX = CRS_STR_LIST.index(DEFAULT_POINTS_CRS)
 
 DEFAULT_OUTPUT_CRS = DEFAULT_POINTS_CRS
 
+
 def main():
     with st.container():
         if hasattr(st.session_state, 'elev_fig'):
@@ -37,29 +39,79 @@ def main():
             
     with st.sidebar:
         st.title("Geospatial Raster Sampling")
-       
-        #st.segmented_control(label='Select point type',
-        #                     options=["Enter coords.",
-        #                              "CSV File"],
-        #                     selection_mode='single',
-        #                     default="Enter coords.",
-        #                     key="points_source",
-        #                     )
-
-        xcoordCol, ycoordCol = st.columns(spec=[0.5, 0.5], gap='small', border=False)
-    
-        xcoordCol.text_input(label='X Coordinate',
-                      on_change=on_xcoord_change,
-                      placeholder="X Coord Value",
-                      help="If you enter two comma or space/tab separated values, it will automatically parse the 2nd as your ycoord.",
-                      key='xcoord'
-                      )
-
-        ycoordCol.text_input(label='Y Coordinate',
-                      placeholder="Y Coord Value",
-                      key='ycoord'
-                      )        
         
+        st.segmented_control('Coordinate type', ['Single', 'Multiple', 'Upload'],
+                             default='Single',
+                             key='coordinate_type')
+        
+        use_single = st.session_state.coordinate_type == 'Single'
+        use_multi = st.session_state.coordinate_type == 'Multiple'
+        use_upload = st.session_state.coordinate_type == 'Upload'
+        
+        with st.expander('Single coordinates', expanded=use_single):
+            xcoordCol, ycoordCol = st.columns(spec=[0.5, 0.5], gap='small', border=False)
+            xcoordCol.text_input(label='X Coordinate',
+                                 on_change=on_xcoord_change,
+                                 placeholder="X Coord Value",
+                                 help="If you enter two comma or space/tab separated values, it will automatically parse the 2nd as your ycoord.",
+                                 key='xcoord',
+                                 disabled=not use_single,
+                                 )
+
+            ycoordCol.text_input(label='Y Coordinate',
+                                 placeholder="Y Coord Value",
+                                 key='ycoord',
+                                 disabled=not use_single
+                                 )
+
+        def do_preview_multi():
+            coordText = st.session_state.multiple_coords_text
+            coordList1 = coordText.split(codecs.decode(st.session_state.multiple_line_sep, 'unicode_escape'))
+            coordListList = [c.split(codecs.decode(st.session_state.multiple_separator, 'unicode_escape')) for c in coordList1 if c.split(codecs.decode(st.session_state.multiple_separator, 'unicode_escape')) != ['']]
+
+            st.session_state.point_table = pd.DataFrame(coordListList, columns=['X', 'Y'])
+            st.dataframe(st.session_state.point_table, height='stretch')
+
+        with st.expander("Multiple coordinates", expanded=use_multi):
+            st.text_area('Copy/paste multiple rows from excel sheet',
+                         key='multiple_coords_text',
+                         disabled=not use_multi)
+            sepCol, lineCol = st.columns([0.5, 0.5])
+            sepCol.text_input('Separator', value=r'\t',
+                              key='multiple_separator',
+                              disabled=not use_multi)
+            lineCol.text_input('Line Separator', value=r'\n',
+                               key='multiple_line_sep',
+                               disabled=not use_multi)
+            st.button('Preview point table', key='preview_multi_button',
+                      on_click=do_preview_multi)
+            
+        def do_preview_upload():
+            if st.session_state.uploaded_file is not None:
+                bytes_data = st.session_state.uploaded_file.getvalue()
+                stringio = StringIO(bytes_data.decode("utf-8"))
+
+
+                st.session_state.point_table = pd.read_csv(stringio, sep=',')
+                xcol = st.session_state.x_col_upload
+                ycol = st.session_state.y_col_upload
+
+                st.session_state.point_table = st.session_state.point_table[[xcol, ycol]]
+                st.session_state.point_table.rename(columns={xcol: 'xcoord', ycol: 'ycoord'}, inplace=True)
+                st.dataframe(st.session_state.point_table, height='stretch')
+            
+        with st.expander('Upload points', expanded=use_upload):
+            xColCol, yColCol = st.columns([0.5, 0.5])
+            xColCol.text_input("X Column", value='xcoord', key='x_col_upload')
+            yColCol.text_input("Y Column", value='ycoord', key='y_col_upload')
+            st.file_uploader(label='File with coordinates',
+                             accept_multiple_files=False,
+                             on_change=do_preview_upload,
+                             key='uploaded_file')
+            
+            st.button("Preview point table", key='preview_upload_button',
+                      on_click=do_preview_upload)
+
         st.selectbox(label="CRS of Input Points",
                      options=CRS_STR_LIST,
                      index=DEFAULT_POINTS_CRS_INDEX,
@@ -169,15 +221,19 @@ def on_xcoord_change():
                     st.session_state.ycoord = xCoordList[1].strip()
                 break
 
-def get_elevation(coords=None, 
-                  elevation_col_name='elevation', 
-                  xcoord_col_name='xcoord', ycoord_col_name='ycoord', 
+def get_elevation(coords=None,
+                  elevation_col_name='elevation',
+                  xcoord_col_name='xcoord', ycoord_col_name='ycoord',
                   points_crs=None, output_crs=None,
-                  elevation_source=None, elev_source_type='service', 
+                  elevation_source=None, elev_source_type='service',
                   raster_crs=None, show_plot=True):
 
     if coords is None:
-        coords = (st.session_state.xcoord, st.session_state.ycoord)
+        coordType = st.session_state.coordinate_type
+        if coordType == "Single":
+            coords = (st.session_state.xcoord, st.session_state.ycoord)
+        elif coordType == 'Multiple' or coordType == 'Upload':
+            coords = st.session_state.point_table
         #if st.session_state.points_source=='Enter coords.':
             #coords = (-88.857362, 42.25637743)
 
@@ -200,8 +256,12 @@ def get_elevation(coords=None,
         output_crs = int(CRS_DICT[st.session_state.output_crs].code)
         output_crs_name = CRS_DICT[st.session_state.output_crs].name
     
-    ptCoordTransformerOUT = pyproj.Transformer.from_crs(crs_from=points_crs, crs_to=output_crs, always_xy=True)
-    ptCoordTransformerRaster = pyproj.Transformer.from_crs(crs_from=points_crs, crs_to=raster_crs, always_xy=True)
+    ptCoordTransformerOUT = pyproj.Transformer.from_crs(crs_from=points_crs,
+                                                        crs_to=output_crs,
+                                                        always_xy=True)
+    ptCoordTransformerRaster = pyproj.Transformer.from_crs(crs_from=points_crs,
+                                                           crs_to=raster_crs,
+                                                           always_xy=True)
 
     if isinstance(coords, (tuple, list)):
         xcoord, ycoord = coords
@@ -218,23 +278,31 @@ def get_elevation(coords=None,
         cols = [f"{points_crs}_xIN", f"{points_crs}_yIN", f"{output_crs}_x", f"{output_crs}_y"]
         coords = pd.DataFrame([[xcoord, ycoord, xcoord_OUT, ycoord_OUT]], columns=cols)
 
-    elif isinstance(coords, (pd.DataFrame, gpd.GeoDataFrame, str, pathlib.Path)):
-        if isinstance(coords, (pathlib.Path, str)):
-            coords = pd.read_csv(coords)
+    elif isinstance(coords, (pd.DataFrame, gpd.GeoDataFrame)):
+        print('COORDS', coords)
+        #if isinstance(coords, (pathlib.Path, str)):
+        #    coords = pd.read_csv(coords)
         xcoord = coords[xcoord_col_name]
         ycoord = coords[ycoord_col_name]
 
-        if str(raster_crs) == '3857':
-            tempCoord = ycoord
-            ycoord = xcoord
-            xcoord = tempCoord
-
         xcoord_OUT, ycoord_OUT = ptCoordTransformerOUT.transform(xcoord, ycoord)
+        xcoord_RAST, ycoord_RAST = ptCoordTransformerRaster.transform(xcoord, ycoord)
 
         minX = min(xcoord_OUT)
         minY = min(ycoord_OUT)
         maxX = max(xcoord_OUT)
         maxY = max(ycoord_OUT)
+
+        minXRast = min(xcoord_RAST)
+        maxXRast = max(xcoord_RAST)
+        minYRast = min(ycoord_RAST)
+        maxYRast = max(ycoord_RAST)
+
+        cols = [f"{points_crs}_xIN", f"{points_crs}_yIN", f"{output_crs}_x", f"{output_crs}_y"]
+        dfList = []
+        for i, xcoordi in enumerate(xcoord):
+            dfList.append([xcoord[i], ycoord[i], xcoord_OUT[i], ycoord_OUT[i]])
+        coords = pd.DataFrame(dfList, columns=cols)
 
     xPad = (maxXRast-minXRast)*0.1
     yPad = (maxYRast-minYRast)*0.1
@@ -354,14 +422,15 @@ def get_elevation(coords=None,
             name='Elevation',
             hovertemplate="Coords: %{x}, %{y}<br>Elev (m): %{z:.2f} m<br>Elev (ft):  %{text} ft<extra></extra>"
         ))
-   
+
+        strList = [str(ind) for ind in coords.index]
         # Add the point marker
         fig.add_trace(go.Scatter(
             x=coords[f"{output_crs}_x"],
             y=coords[f"{output_crs}_y"],
             mode='markers+text',
             marker=dict(
-                symbol='star',
+                symbol=strList,
                 size=15,
                 color='red',
                 line=dict(width=2, color='black')
