@@ -66,16 +66,24 @@ def main():
 
         def do_preview_multi():
             coordText = st.session_state.multiple_coords_text
-            coordList1 = coordText.split(codecs.decode(st.session_state.multiple_line_sep, 'unicode_escape'))
-            coordListList = [c.split(codecs.decode(st.session_state.multiple_separator, 'unicode_escape')) for c in coordList1 if c.split(codecs.decode(st.session_state.multiple_separator, 'unicode_escape')) != ['']]
+            lineDelimiter = st.session_state.multiple_line_sep
+            if lineDelimiter[0] == r'\blah'[0]:
+                lineDelimiter = codecs.decode(st.session_state.multiple_line_sep, 'unicode_escape')
+            coordList1 = coordText.split(lineDelimiter)
+            
+            coordDelimiter = st.session_state.multiple_separator
+            if coordDelimiter[0] == r'\blah'[0]:
+                coordDelimiter = codecs.decode(st.session_state.multiple_separator, 'unicode_escape') 
+            coordListList = [c.split(coordDelimiter) for c in coordList1 if c.split(coordDelimiter) != ['']]
 
-            st.session_state.point_table = pd.DataFrame(coordListList, columns=['X', 'Y'])
+            st.session_state.point_table = pd.DataFrame(coordListList, columns=['xcoord', 'ycoord'])
             st.dataframe(st.session_state.point_table, height='stretch')
 
         with st.expander("Multiple coordinates", expanded=use_multi):
             st.text_area('Copy/paste multiple rows from excel sheet',
                          key='multiple_coords_text',
                          disabled=not use_multi)
+
             sepCol, lineCol = st.columns([0.5, 0.5])
             sepCol.text_input('Separator', value=r'\t',
                               key='multiple_separator',
@@ -83,14 +91,27 @@ def main():
             lineCol.text_input('Line Separator', value=r'\n',
                                key='multiple_line_sep',
                                disabled=not use_multi)
+
+            coordText = st.session_state.multiple_coords_text
+            lineDelimiter = st.session_state.multiple_line_sep
+            if lineDelimiter[0] == r'\blah'[0]:
+                lineDelimiter = codecs.decode(st.session_state.multiple_line_sep, 'unicode_escape')
+            coordList1 = coordText.split(lineDelimiter)
+
+            coordDelimiter = st.session_state.multiple_separator
+            if coordDelimiter[0] == r'\blah'[0]:
+                coordDelimiter = codecs.decode(st.session_state.multiple_separator, 'unicode_escape')            
+            coordListList = [c.split(coordDelimiter) for c in coordList1 if c.split(coordDelimiter) != ['']]
+
+            st.session_state.point_table = pd.DataFrame(coordListList, columns=['xcoord', 'ycoord'])
+
             st.button('Preview point table', key='preview_multi_button',
                       on_click=do_preview_multi)
             
         def do_preview_upload():
-            if st.session_state.uploaded_file is not None:
+            if st.session_state.uploaded_file is not None and st.session_state.coordinate_type=='Upload':
                 bytes_data = st.session_state.uploaded_file.getvalue()
                 stringio = StringIO(bytes_data.decode("utf-8"))
-
 
                 st.session_state.point_table = pd.read_csv(stringio, sep=',')
                 xcol = st.session_state.x_col_upload
@@ -108,7 +129,18 @@ def main():
                              accept_multiple_files=False,
                              on_change=do_preview_upload,
                              key='uploaded_file')
-            
+
+            if st.session_state.uploaded_file is not None and st.session_state.coordinate_type=='Upload':
+                bytes_data = st.session_state.uploaded_file.getvalue()
+                stringio = StringIO(bytes_data.decode("utf-8"))
+
+                st.session_state.point_table = pd.read_csv(stringio, sep=',')
+                xcol = st.session_state.x_col_upload
+                ycol = st.session_state.y_col_upload
+
+                st.session_state.point_table = st.session_state.point_table[[xcol, ycol]]
+                st.session_state.point_table.rename(columns={xcol: 'xcoord', ycol: 'ycoord'}, inplace=True)
+
             st.button("Preview point table", key='preview_upload_button',
                       on_click=do_preview_upload)
 
@@ -279,7 +311,6 @@ def get_elevation(coords=None,
         coords = pd.DataFrame([[xcoord, ycoord, xcoord_OUT, ycoord_OUT]], columns=cols)
 
     elif isinstance(coords, (pd.DataFrame, gpd.GeoDataFrame)):
-        print('COORDS', coords)
         #if isinstance(coords, (pathlib.Path, str)):
         #    coords = pd.read_csv(coords)
         xcoord = coords[xcoord_col_name]
@@ -430,14 +461,24 @@ def get_elevation(coords=None,
             y=coords[f"{output_crs}_y"],
             mode='markers+text',
             marker=dict(
-                symbol=strList,
-                size=15,
+                symbol='star',
+                size=18,
                 color='red',
                 line=dict(width=2, color='black')
             ),
             text=[f"{float(c['Elev_ft']):.1f} ft<br>{float(c['Elev_m']):.2f} m" for i, c in coords.iterrows()],
-            textposition="top right",
-            textfont=dict(color="red", size=12),
+            textposition="middle right",
+            textfont=dict(color="black", size=12),
+            name=f"Point Elevation",
+        ))
+
+        fig.add_trace(go.Scatter(
+            x=coords[f"{output_crs}_x"],
+            y=coords[f"{output_crs}_y"],
+            mode='text',
+            text=[f"{strList[i].zfill(len(strList[-1]))}" for i, c in coords.iterrows()],
+            textposition="middle center",
+            textfont=dict(color="white", size=9),
             name=f"Point Elevation",
         ))
 
@@ -455,8 +496,8 @@ def get_elevation(coords=None,
             xaxis_tickformat=tickFormat,
             xaxis_range=[min(x_coords), max(x_coords)],
             yaxis_range=[min(y_coords), max(y_coords)],
-            width=800,
-            height=800,
+            width=1000,
+            height=1000,
             xaxis=dict(scaleanchor='y'),
             autosize=True,
             coloraxis_colorbar=dict(#yanchor="top", y=1, x=0,
