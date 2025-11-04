@@ -442,17 +442,46 @@ def get_elevation(coords=None,
         customDataArr = np.round(elevData_ft.values, 2).astype(str)
 
         # Create elevation heatmap
-        fig = go.Figure(data=go.Heatmap(
-            z=data,
-            x=x_coords,
-            y=y_coords,
-            colorscale='Geyser',
-            text=customDataArr,
-            zmin=vMin,
-            zmax=vMax,
-            name='Elevation',
-            hovertemplate="Coords: %{x}, %{y}<br>Elev (m): %{z:.2f} m<br>Elev (ft):  %{text} ft<extra></extra>"
-        ))
+        #fig = go.Figure(data=go.Heatmap(
+        #    z=data,
+        #    x=x_coords,
+        #    y=y_coords,
+        #    colorscale='Geyser',
+        #    text=customDataArr,
+        #    zmin=vMin,
+        #    zmax=vMax,
+        #    name='Elevation',
+        #    hovertemplate="Coords: %{x}, %{y}<br>Elev (m): %{z:.2f} m<br>Elev (ft):  %{text} ft<extra></extra>"
+        #))
+
+        usgstopo = r"https://basemap.nationalmap.gov/arcgis/services/USGSTopo/MapServer/WMSServer?request=GetCapabilities&service=WMS"
+        wms = WebMapService(usgstopo)
+        #[print(k, wms.contents[k].title) for k in wms.contents]
+        layer_name = wms.contents['0'].title
+
+        bbox = (rasterXMin, rasterYMin, rasterXMax, rasterYMax)
+
+        img = wms.getmap(
+            layers='0',
+            srs='EPSG:3857',
+            bbox=bbox,
+            size=(256, 256),
+            format='image/tiff',
+            transparent=True
+            )
+        bio = BytesIO(img.read())
+        topoMap = rxr.open_rasterio(bio)        
+
+        xUpdate = np.linspace(start=rasterXMax, stop=rasterXMax, num=256)
+        yUpdate = np.linspace(start=rasterYMin, stop=rasterYMax, num=256)
+        #newImg = np.stack(topoMap)
+
+        topoMap = topoMap.assign_coords({'x':xUpdate, 'y':yUpdate, 'band':[0, 1, 2]})
+
+        fig = go.Figure((px.imshow(
+            img=topoMap, 
+            facet_col='band',
+        )))
 
         strList = [str(ind) for ind in coords.index]
         # Add the point marker
