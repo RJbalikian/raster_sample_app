@@ -167,6 +167,11 @@ def main():
                   help="Select the zoom level of the map (higher is more zoomed)",
                   key='zoom_level')
 
+        st.slider("Topo Map Opacity", min_value=0.0, max_value=1.0, value=0.0, step=0.1,
+                  help="Select the opacity of the background USGS Topo Map",
+                  key='topo_opacity')
+
+
         st.divider()
         
         raster_expander = st.expander(label='Raster Info.')
@@ -341,17 +346,16 @@ def get_elevation(coords=None,
     if float(xPad) == 0.0:
         xPad = maxXRast * 0.01
         xPad = abs(xPad)
-        if abs(xPad) > 5000:
-            xPad = 5000
+        if abs(xPad) > 7500:
+            xPad = 7500
 
     if float(yPad) == 0.0:
         yPad = maxYRast * 0.01
         yPad = abs(yPad)
-        if yPad > 5000:
-            yPad = 5000
+        if abs(yPad) > 7500:
+            yPad = 7500
 
-    xPad = max(xPad, yPad) / st.session_state.zoom_level
-    yPad = max(xPad, yPad) / st.session_state.zoom_level
+    xPad = yPad = max(xPad, yPad) / st.session_state.zoom_level
 
     rasterXMin = minXRast-xPad
     rasterXMax = maxXRast+xPad
@@ -441,47 +445,70 @@ def get_elevation(coords=None,
         import numpy as np
         customDataArr = np.round(elevData_ft.values, 2).astype(str)
 
-        # Create elevation heatmap
-        #fig = go.Figure(data=go.Heatmap(
-        #    z=data,
-        #    x=x_coords,
-        #    y=y_coords,
-        #    colorscale='Geyser',
-        #    text=customDataArr,
-        #    zmin=vMin,
-        #    zmax=vMax,
-        #    name='Elevation',
-        #    hovertemplate="Coords: %{x}, %{y}<br>Elev (m): %{z:.2f} m<br>Elev (ft):  %{text} ft<extra></extra>"
-        #))
+        if st.session_state.topo_opacity==0:
+            # Create elevation heatmap
+            fig = go.Figure(data=go.Heatmap(
+                z=data,
+                x=x_coords,
+                y=y_coords,
+                colorscale='Geyser',
+                text=customDataArr,
+                zmin=vMin,
+                zmax=vMax,
+                name='Elevation',
+                hovertemplate="Coords: %{x}, %{y}<br>Elev (m): %{z:.2f} m<br>Elev (ft):  %{text} ft<extra></extra>"
+            ))
+        else:
+            usgstopo = r"https://basemap.nationalmap.gov/arcgis/services/USGSTopo/MapServer/WMSServer?request=GetCapabilities&service=WMS"
+            wms = WebMapService(usgstopo)
+            #[print(k, wms.contents[k].title) for k in wms.contents]
+            layer_name = wms.contents['0'].title
 
-        usgstopo = r"https://basemap.nationalmap.gov/arcgis/services/USGSTopo/MapServer/WMSServer?request=GetCapabilities&service=WMS"
-        wms = WebMapService(usgstopo)
-        #[print(k, wms.contents[k].title) for k in wms.contents]
-        layer_name = wms.contents['0'].title
+            bbox = (rasterXMin, rasterYMin, rasterXMax, rasterYMax)
+            usgsTopoCoordXForm = pyproj.Transformer.from_crs(crs_from=raster_crs,
+                                                        crs_to='EPSG:3857',
+                                                        always_xy=True)
+            
+            topoSize = 512
 
-        bbox = (rasterXMin, rasterYMin, rasterXMax, rasterYMax)
+            bboxPts = usgsTopoCoordXForm.transform([rasterXMin, rasterXMax], [rasterYMin, rasterYMax])
+            bbox = (bboxPts[0][0], bboxPts[1][0], bboxPts[0][1], bboxPts[1][1])
+            img = wms.getmap(
+                layers='0',
+                srs='EPSG:3857',
+                bbox=bbox,
+                size=(topoSize, topoSize),
+                format='image/tiff',
+                transparent=True
+                )
+            bio = BytesIO(img.read())
+            topoMap_rxr = rxr.open_rasterio(bio)
 
-        img = wms.getmap(
-            layers='0',
-            srs='EPSG:3857',
-            bbox=bbox,
-            size=(256, 256),
-            format='image/tiff',
-            transparent=True
-            )
-        bio = BytesIO(img.read())
-        topoMap = rxr.open_rasterio(bio)        
+            xUpdate = np.linspace(min(x_coords), max(x_coords), topoSize)
+            yUpdate = np.flip(np.linspace(max(y_coords), min(y_coords), topoSize))
 
-        xUpdate = np.linspace(start=rasterXMax, stop=rasterXMax, num=256)
-        yUpdate = np.linspace(start=rasterYMin, stop=rasterYMax, num=256)
-        #newImg = np.stack(topoMap)
+            topoMap = topoMap_rxr.assign_coords({'x':xUpdate, 'y':yUpdate})
+            topoMap = topoMap.transpose('y', 'x' , 'band')
+            topoMap.data = np.flip(topoMap.data, axis=0)
+            topoMap = topoMap.rio.write_crs(output_crs)
+            #topoMap = topoMap.rio.reproject(output_crs)
 
-        topoMap = topoMap.assign_coords({'x':xUpdate, 'y':yUpdate, 'band':[0, 1, 2]})
+            fig = go.Figure((px.imshow(
+                img=topoMap,
+            )))
 
-        fig = go.Figure((px.imshow(
-            img=topoMap, 
-            facet_col='band',
-        )))
+            fig.add_trace(go.Heatmap(
+                z=data,
+                x=x_coords,
+                y=y_coords,
+                colorscale='Earth_r',
+                text=customDataArr,
+                zmin=vMin,
+                zmax=vMax,
+                opacity=1-st.session_state.topo_opacity,
+                name='Elevation',
+                hovertemplate="Coords: %{x}, %{y}<br>Elev (m): %{z:.2f} m<br>Elev (ft):  %{text} ft<extra></extra>"
+                ))
 
         strList = [str(ind) for ind in coords.index]
         # Add the point marker
