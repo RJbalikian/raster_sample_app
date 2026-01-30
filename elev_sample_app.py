@@ -25,7 +25,7 @@ RASTER_SRC_DICT = {"ISGS Statewide Lidar":IL_LIDAR_URL,
                    "Raster file":"get_file_name"
                    }
 
-DEFAULT_POINTS_CRS = "EPSG:4326 - WGS 84"#"EPSG:6345 - NAD83(2011) / UTM zone 16N"
+DEFAULT_POINTS_CRS = "EPSG:6345 - NAD83(2011) / UTM zone 16N"
 DEFAULT_POINTS_CRS_INDEX = CRS_STR_LIST.index(DEFAULT_POINTS_CRS)
 
 DEFAULT_OUTPUT_CRS = DEFAULT_POINTS_CRS
@@ -265,6 +265,15 @@ def get_elevation(coords=None,
                   elevation_source=None, elev_source_type='service',
                   raster_crs=None, show_plot=True):
 
+    """This function takes coordinates, specified raster (services), and specified output CRS
+       and extracts the elevation values from the raster at the specified coordinates.
+       As a streamlit app, this also plots the raster data around the point(s) and the points,
+       then displays the points and relevant information in a dataframe that can be copy/pasted.
+       
+       This was adapted from a standalone python script, so there are inputs/parameters that may
+       not be relevant in the streamlit app.
+    """
+
     if coords is None:
         coordType = st.session_state.coordinate_type
         if coordType == "Single":
@@ -280,7 +289,7 @@ def get_elevation(coords=None,
     else:
         elevation_source = GMRT_BASE_URL
 
-    # Get values for other points
+    # Get CRS of points, raster, and specified output
     if points_crs is None:
         points_crs = int(CRS_DICT[st.session_state.point_crs].code)
         points_crs_name = CRS_DICT[st.session_state.point_crs].name
@@ -292,7 +301,8 @@ def get_elevation(coords=None,
     if output_crs is None:
         output_crs = int(CRS_DICT[st.session_state.output_crs].code)
         output_crs_name = CRS_DICT[st.session_state.output_crs].name
-    
+
+    # Project coordinates into CRS of raster and specified output CRS
     ptCoordTransformerOUT = pyproj.Transformer.from_crs(crs_from=points_crs,
                                                         crs_to=output_crs,
                                                         always_xy=True)
@@ -300,6 +310,7 @@ def get_elevation(coords=None,
                                                            crs_to=raster_crs,
                                                            always_xy=True)
 
+    # If a single coordinate set, put it in a dataframe for consistent formatting
     if isinstance(coords, (tuple, list)):
         xcoord, ycoord = coords
 
@@ -316,8 +327,8 @@ def get_elevation(coords=None,
         coords = pd.DataFrame([[xcoord, ycoord, xcoord_OUT, ycoord_OUT]], columns=cols)
 
     elif isinstance(coords, (pd.DataFrame, gpd.GeoDataFrame)):
-        #if isinstance(coords, (pathlib.Path, str)):
-        #    coords = pd.read_csv(coords)
+        # Reformat (geo)dataframes for consistent formatting
+
         xcoord = coords[xcoord_col_name]
         ycoord = coords[ycoord_col_name]
 
@@ -340,6 +351,7 @@ def get_elevation(coords=None,
             dfList.append([xcoord[i], ycoord[i], xcoord_OUT[i], ycoord_OUT[i]])
         coords = pd.DataFrame(dfList, columns=cols)
 
+    # Get padding for visualization purposes
     xPad = (maxXRast-minXRast)*0.1
     yPad = (maxYRast-minYRast)*0.1
 
@@ -362,6 +374,9 @@ def get_elevation(coords=None,
 
     rasterYMin = minYRast-yPad
     rasterYMax = maxYRast+yPad
+    
+    # Read in data from service or file, as appropriate
+    # ISGS lidar is from the statewide WGS84 service, read in as an (rio)xarray DataSet
     if elev_source_type=='service':
         if "ISGS" in st.session_state.raster_source_select:
             wms = WebMapService(elevation_source)
@@ -403,6 +418,8 @@ def get_elevation(coords=None,
         elevData_ft = elevData_m / 0.3048
 
     elif elev_source_type == 'file':
+        # Reading in from file is not fully tested
+
         elevData_rxr = rxr.open_rasterio(elevation_source)
         elevData_rxr= elevData_rxr.rio.reproject(output_crs)
 
@@ -414,6 +431,7 @@ def get_elevation(coords=None,
             elevData_ft = elevData_m / 0.3048
 
     # Calculate elevation and add to df
+    # I.E., Extract the value of the raster at each coordinate in the dataframe (which may just be one point)
     elev_m = []
     for i, row in coords.iterrows():
         lidarSel = elevData_m.copy()
@@ -424,7 +442,8 @@ def get_elevation(coords=None,
                                method='nearest').values
 
         elev_m.append(elevVal)
-        
+
+    # Add elevation to the dataframe (this will be shown in the web app)
     coords['Elev_m'] = elev_m
     coords['Elev_m'] = coords['Elev_m'].astype(float)
     coords['Elev_ft'] = coords['Elev_m'] / 0.3048
@@ -564,7 +583,7 @@ def get_elevation(coords=None,
     st.session_state.elev_fig = fig
     st.session_state.coords_df = coords
     st.balloons()
-    return 
+    return
 
 if __name__ == "__main__":
     main()
