@@ -167,7 +167,7 @@ def main():
                   help="Select the zoom level of the map (higher is more zoomed)",
                   key='zoom_level')
 
-        st.slider("Topo Map Opacity", min_value=0.0, max_value=1.0, value=0.0, step=0.1,
+        st.slider("Topo Map Opacity", min_value=0.0, max_value=1.0, value=0.5, step=0.1,
                   help="Select the opacity of the background USGS Topo Map",
                   key='topo_opacity')
 
