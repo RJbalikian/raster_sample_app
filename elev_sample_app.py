@@ -174,13 +174,13 @@ def main():
 
         st.divider()
         
-        raster_expander = st.expander(label='Raster Info.')
+        raster_expander = st.expander(label='Raster Info.', expanded=True)
 
         with raster_expander:
             st.selectbox(label="Select raster/elevation data source",
                      options=list(RASTER_SRC_DICT.keys()),
-                     index=0, key='raster_source_select',
-                     help="Select the source you would like to use for elevation.",
+                     index=1, key='raster_source_select',
+                     help="Select the source you would like to use for elevation. Currently, only GMRT supported",
                      on_change=on_raster_source_change,
                      disabled=False,
                      )
