@@ -163,7 +163,7 @@ def main():
                   type='primary',
                   )
 
-        st.slider("Zoom level", min_value=1, max_value=10, value=1, step=1,
+        st.slider("Zoom level", min_value=1, max_value=10, value=10, step=1,
                   help="Select the zoom level of the map (higher is more zoomed)",
                   key='zoom_level')
 
@@ -179,7 +179,7 @@ def main():
         with raster_expander:
             st.selectbox(label="Select raster/elevation data source",
                      options=list(RASTER_SRC_DICT.keys()),
-                     index=1, key='raster_source_select',
+                     index=0, key='raster_source_select',
                      help="Select the source you would like to use for elevation. Currently, only GMRT supported",
                      on_change=on_raster_source_change,
                      disabled=False,
@@ -438,7 +438,7 @@ def get_elevation(coords=None,
         xc = row[f"{output_crs}_x"]
         yc = row[f"{output_crs}_y"]
 
-        elevVal = lidarSel.sel(x=xc, y=yc, 
+        elevVal = lidarSel.sel(x=xc, y=yc,
                                method='nearest').values
 
         elev_m.append(elevVal)
